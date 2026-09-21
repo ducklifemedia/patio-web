@@ -121,10 +121,10 @@
         config.requiresOperator && !config.operatorAuthorized ? 'El checkout está reservado a una prueba privada. Ingresa la clave de esta ronda para habilitarlo.' :
         config.available && config.mode === 'test' && config.livePaymentsAllowed === false ?
         'Sólo cuentas y medios de prueba. La cuenta vendedora se comprobará en el servidor antes de abrir el checkout. No uses tarjetas reales.' :
-        'Mercado Pago todavía no está conectado. Puedes guardar un pedido local de prueba con el botón de arriba.');
+        'Mercado Pago no está habilitado para esta ronda. Conserva tu carrito y vuelve a comprobar más tarde.');
       refresh();
     }).catch(() => {
-      setNote('Mercado Pago no está disponible en este momento. El pedido local de prueba sigue disponible si el ERP está encendido.');
+      setNote('Mercado Pago no está disponible en este momento. Conserva tu carrito y vuelve a comprobar más tarde.');
       refresh();
     });
   }
@@ -171,7 +171,7 @@
     // Return parameters only identify a resource to verify. status / collection_status never authorize success.
     history.replaceState(null,'',location.pathname);
     if (!context || context.orderId !== orderId || !keyPattern.test(context.accessKey)) {
-      target.innerHTML = `<div class="receipt-heading"><span class="payment-mark" aria-hidden="true">↗</span><p class="eyebrow">MERCADO PAGO · PRUEBA</p><h1>Volvamos a<br><em>conectar.</em></h1><p>No encontramos este intento en la sesión del navegador.<br>El enlace de regreso no confirma un pago por sí solo.</p></div><div class="payment-return-note"><p>Vuelve desde la misma pestaña donde abriste el checkout. Si cerraste esa sesión, el intento debe revisarse desde el ERP.</p><a class="text-link" href="${link('finalizar/')}">Volver al pedido ↗</a></div>`;
+      target.innerHTML = `<div class="receipt-heading"><span class="payment-mark" aria-hidden="true">↗</span><p class="eyebrow">MERCADO PAGO · PRUEBA</p><h1>Volvamos a<br><em>conectar.</em></h1><p>No encontramos este intento en la sesión del navegador.<br>El enlace de regreso no confirma un pago por sí solo.</p></div><div class="payment-return-note"><p>Vuelve desde la misma pestaña donde abriste el checkout. Si cerraste esa sesión, el intento debe revisarlo el operador de la prueba.</p><a class="text-link" href="${link('finalizar/')}">Volver al pedido ↗</a></div>`;
       return;
     }
     save('patio.payment.return.v1',{orderId,paymentId});
