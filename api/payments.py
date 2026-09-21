@@ -192,7 +192,7 @@ def verify_webhook(query, headers, body, secret, clock=time.time):
     if (body.get('type')!='payment' or q.get('type',['payment'])!=['payment']
             or not isinstance(body.get('data'),dict) or str(body['data'].get('id'))!=payment_id):
         fail('invalid_webhook','El recurso recibido no coincide con la firma.',400)
-    # live_mode in payload is not trusted: fetched payment must itself be test-only.
+    # Payload flags are not trusted: the fetched merchant order must be test-only.
     return payment_id
 
 
@@ -396,13 +396,17 @@ class PaymentStore:
         if row is None: fail('checkout_not_found','Intento no reconocido.',404)
         if row['stage']!='ready': fail('checkout_pending','La preferencia aún no está confirmada; la notificación puede reintentarse.',503)
         snap=json.loads(row['snapshot'])
-        if (payment.get('live_mode') is not False or str(payment.get('collector_id'))!=row['seller_id']
+        if (type(payment.get('live_mode')) is not bool or str(payment.get('collector_id'))!=row['seller_id']
                 or payment.get('currency_id')!='CLP' or number(payment.get('transaction_amount'))!=snap['total']):
             fail('payment_mismatch','No coinciden el entorno, vendedor, moneda o importe de la prueba.',409)
         merchant=(payment.get('order') or {}).get('id')
         if not _ID.fullmatch(str(merchant or '')): fail('payment_mismatch','Falta la orden comercial asociada.',409)
         mo=self.client.get_merchant_order(str(merchant))
-        if (str(mo.get('id'))!=str(merchant) or mo.get('preference_id')!=row['preference_id']
+        # Official test accounts can produce payment.live_mode=True. The
+        # authenticated merchant order supplies the test classification. Both
+        # callers verify the configured seller's MLC/test_user identity first.
+        if (mo.get('is_test') is not True
+                or str(mo.get('id'))!=str(merchant) or mo.get('preference_id')!=row['preference_id']
                 or mo.get('external_reference')!=order_id
                 or str((mo.get('collector') or {}).get('id'))!=row['seller_id']
                 or not any(str(p.get('id'))==payment_id for p in mo.get('payments',[]))):

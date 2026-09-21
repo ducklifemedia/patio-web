@@ -787,7 +787,7 @@ window.PATIO_CONTENT = {
     },
     {
       "question": "¿Puedo comprar y pagar en esta versión?",
-      "answer": "Puedes armar un carrito y registrar un pedido de prueba en la versión local. No se cobra dinero, no se reserva stock ni se coordina un despacho. El registro permite probar el recorrido completo sin generar una compra real."
+      "answer": "Puedes armar un carrito y, con acceso privado, recorrer el checkout de prueba de Mercado Pago. No se cobra dinero real, no se reserva stock ni se coordina un despacho. La tienda pública no acepta ventas reales."
     },
     {
       "question": "¿En qué moneda están los precios?",
@@ -795,7 +795,7 @@ window.PATIO_CONTENT = {
     },
     {
       "question": "¿Cómo funciona el carrito?",
-      "answer": "Agrega productos, ajusta las cantidades o quita piezas antes de continuar. El carrito se conserva en este navegador; al registrar el pedido de prueba, el servidor local vuelve a calcular el total con el catálogo vigente."
+      "answer": "Agrega productos, ajusta las cantidades o quita piezas antes de continuar. El carrito se conserva en este navegador; al preparar el intento de prueba, el servidor vuelve a calcular el total con el catálogo vigente."
     },
     {
       "question": "¿Hay despacho o retiro disponible?",

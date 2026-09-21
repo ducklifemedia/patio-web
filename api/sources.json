@@ -1,7 +1,7 @@
 {
   "payments.py": {
     "source": "app/payments.py",
-    "sha256": "0232861084fe460e708303c3170737816b6fb3333e11efc6cd580f77ea23fb91"
+    "sha256": "b67e68305387a6028092bafeb7c64fd663d7632ce44c15c503c2899be5124164"
   },
   "payments_http.py": {
     "source": "app/payments_http.py",
@@ -17,6 +17,6 @@
   },
   "catalog.json": {
     "source": "artifacts/patio-web/site/assets/catalog.json",
-    "sha256": "5698d0e039f35098efa89cdf5d56e40d67a15a1f643ba1bb16eb94ffdbc4e7ca"
+    "sha256": "5cc24cc46b1664541b8c2d067eeaa4cdfa4b8dce7f6ba216e5538a2ebba59c56"
   }
 }
