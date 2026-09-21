@@ -1,0 +1,7 @@
+{
+  "scriptFile": "__init__.py",
+  "bindings": [
+    {"authLevel":"anonymous","type":"httpTrigger","direction":"in","name":"req","route":"patio/{*route}","methods":["get","post","head","options","put","delete","patch"]},
+    {"type":"http","direction":"out","name":"$return"}
+  ]
+}

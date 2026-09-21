@@ -1,3 +1,4 @@
 User-agent: *
 Allow: /
+
 Sitemap: https://red-cliff-062c48b0f.4.azurestaticapps.net/sitemap.xml

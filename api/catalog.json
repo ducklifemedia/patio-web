@@ -1,4 +1,4 @@
-window.PATIO_CONTENT = {
+{
   "products": [
     {
       "id": "bruma",
@@ -810,4 +810,4 @@ window.PATIO_CONTENT = {
       "answer": "Mide con la puerta abierta y marca en el suelo las dimensiones publicadas. Prueba además el espacio para pasar, sentarte y regar: la medida del mueble no incluye esa circulación."
     }
   ]
-};
+}

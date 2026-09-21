@@ -5,20 +5,24 @@ import json
 import os
 from pathlib import Path
 import shutil
+from render_store import render
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "_site"
-DIRECTORIES = {"assets", "blog", "productos", "privacidad"}
+DIRECTORIES = {"assets", "blog", "productos", "privacidad", "carrito", "finalizar", "pedido", "ayuda", "espacios", "pago"}
 FILES = {
-    "index.html", "styles.css", "app.js", "404.html", "robots.txt", "sitemap.xml",
+    "index.html", "styles.css", "404.html", "robots.txt", "sitemap.xml",
     "staticwebapp.config.json", "analytics.js", "analytics-config.js", "analytics.css",
-    "landing.css", "landing.js",
+    "landing.css",
+    "store.css", "store.js",
+    "geo.css", "payments.js", "payments.css",
 }
 ALLOWED = {".html", ".css", ".js", ".json", ".xml", ".txt", ".svg", ".png",
            ".jpg", ".jpeg", ".webp", ".woff", ".woff2", ".ttf", ".ico"}
 
 
 def build():
+    render()
     if OUTPUT.exists():
         if OUTPUT.is_symlink() or OUTPUT.resolve().parent != ROOT.resolve():
             raise RuntimeError("Output must remain directly inside this repository")
