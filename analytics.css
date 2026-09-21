@@ -1,0 +1,20 @@
+/* PATIO · preferencias con las tipografías locales del sitio. */
+.patio-consent-banner[hidden]{display:none!important}
+.patio-consent-banner{position:fixed;z-index:80;bottom:20px;left:20px;right:20px;margin:auto;max-width:1180px;background:#f7f5ef;color:#24382f;border:1px solid #cdd2c3;border-radius:3px;box-shadow:0 8px 50px #24382f26;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:30px;font-family:Manrope,Arial,sans-serif}
+.patio-consent-kicker{display:block;font:600 9px/1.6 Manrope,Arial,sans-serif;letter-spacing:.13em;margin-bottom:8px}
+.patio-consent-banner h2,.patio-consent-dialog h2{font:400 34px/1.08 Newsreader,Georgia,serif;margin:0 0 12px}
+.patio-consent-banner p{font-size:11px;line-height:1.75;margin:0;max-width:540px}
+.patio-consent-actions{display:flex;align-items:stretch;gap:9px;flex-wrap:wrap}
+.patio-consent-actions button{border:1px solid #a9b3a6;background:transparent;border-radius:2px;padding:12px 15px;min-height:44px;font:500 11px/1.45 Manrope,Arial,sans-serif;color:#24382f;white-space:nowrap}
+.patio-consent-actions button.patio-consent-accept{background:#24382f;color:#f1ede3;border-color:#24382f}
+.patio-consent-actions button:hover{background:#e5ebda}.patio-consent-actions button.patio-consent-accept:hover{background:#344f41}
+.patio-consent-dialog{color:#24382f;background:#f7f5ef;border:1px solid #cdd2c3;border-radius:4px;padding:38px;width:min(540px,calc(100% - 28px));max-height:calc(100dvh - 32px);font-family:Manrope,Arial,sans-serif;box-shadow:0 10px 65px #0003}
+.patio-consent-dialog::backdrop{background:#1f332bad;backdrop-filter:blur(4px)}
+.patio-consent-dialog h2{font-size:47px}.patio-consent-dialog p{font-size:12px;line-height:1.75}
+.patio-consent-close{position:absolute;right:14px;top:9px;width:38px;height:38px;font-size:26px;padding:0;background:none;border:0;color:inherit}
+.patio-consent-option{display:flex;align-items:flex-start;gap:15px;padding:20px 0;border-bottom:1px solid #d5d8cc;cursor:pointer}
+.patio-consent-option input,.patio-consent-remember input{accent-color:#24382f;width:18px;height:18px;flex-shrink:0;margin-top:2px}
+.patio-consent-option strong{display:block;font-size:13px;line-height:1.5;margin-bottom:5px}.patio-consent-option small{display:block;font-size:11px;line-height:1.75;color:#59675d}
+.patio-consent-remember{display:flex;gap:12px;align-items:flex-start;font-size:11px;line-height:1.65;margin-top:22px;cursor:pointer}
+.patio-consent-dialog .patio-consent-note{font-size:10px;color:#657167;margin:15px 0 23px}
+@media(max-width:760px){.patio-consent-banner{left:10px;right:10px;bottom:10px;padding:20px;display:block}.patio-consent-banner h2{font-size:29px}.patio-consent-banner .patio-consent-actions{margin-top:16px}.patio-consent-actions button{flex:1;padding:11px 12px;font-size:10px}.patio-consent-dialog{padding:32px 24px}.patio-consent-dialog h2{font-size:42px}}

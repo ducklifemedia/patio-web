@@ -1,0 +1,7 @@
+_site/
+node_modules/
+.env
+.env.*
+*.log
+__pycache__/
+.DS_Store
