@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import hashlib
 from itertools import islice
+import json
 import os
 import re
 from urllib.parse import urlsplit
 
 from domain import DomainError
-from payments import fail, remaining_timeout
+from payments import (fail, remaining_timeout, bridge_enabled, make_bridge_event,
+                      validate_bridge_page, validate_bridge_ack)
 
 
 CHECKOUT_FIELDS = (
@@ -204,6 +206,8 @@ class AzureTablePaymentRepository:
                                  {'order_id': order_id, 'preference_id': preference_id})
             operations = [('create', alias),
                           ('update', self._entity(entity['RowKey'], row), self._cas(entity))]
+            if bridge_enabled(row):
+                operations.extend(self._bridge_operations(row, [], 'checkout.ready', None))
             if self._transaction(operations):
                 return row
         _unavailable()
@@ -258,6 +262,65 @@ class AzureTablePaymentRepository:
             else:
                 operations = [('create', self._entity(key, row)),
                               ('create', self._entity(orderkey, row))]
+            checkout = self._get(self._key('order', row['order_id']))
+            if checkout is not None and bridge_enabled(checkout):
+                head = self._get(self._key('bridge-head', row['order_id']))
+                if head is None:
+                    _unavailable()
+                current = self.payments_for_order(row['order_id'])
+                current = [p for p in current if p['payment_id'] != row['payment_id']] + [row]
+                current.sort(key=lambda p: (p['provider_updated'], p['payment_id']), reverse=True)
+                operations.extend(self._bridge_operations(checkout, current, 'payment.observed', head))
             if self._transaction(operations):
                 return
+        _unavailable()
+
+    def _bridge_operations(self, checkout, payments, kind, head):
+        sequence = head['sequence'] + 1 if head is not None else 1
+        event = make_bridge_event(checkout, sequence, payments, kind)
+        next_head = self._entity(self._key('bridge-head', checkout['order_id']), {'sequence': sequence})
+        head_change = ('update', next_head, self._cas(head)) if head is not None else ('create', next_head)
+        row = {'event_id': event['id'], 'document': json.dumps(event, ensure_ascii=False, separators=(',', ':')), 'acknowledged': False}
+        return [head_change, ('create', self._entity(self._key('bridge-event', event['id']), row)),
+                ('create', self._entity('bridge-pending|' + event['id'], row))]
+
+    def pull_bridge_events(self, limit=30, cursor=None):
+        validate_bridge_page(limit, cursor)
+        prefix = 'bridge-pending|'
+        lower = prefix + cursor if cursor else prefix
+        comparison = 'gt' if cursor else 'ge'
+        try:
+            pages = self.client.query_entities(
+                query_filter=f'PartitionKey eq @seller and RowKey {comparison} @lower and RowKey lt @upper',
+                parameters={'seller': self.partition, 'lower': lower, 'upper': 'bridge-pending}'},
+                results_per_page=limit + 1, **self._io_options()).by_page()
+            entities = list(islice(next(pages, ()), limit + 1))
+        except Exception:
+            _unavailable()
+        remaining_timeout()
+        if not entities and pages.continuation_token:
+            _unavailable()
+        selected = entities[:limit]
+        more = len(entities) > limit or bool(pages.continuation_token)
+        return {'events': [json.loads(row['document']) for row in selected],
+                'nextCursor': selected[-1]['event_id'] if more and selected else None}
+
+    def ack_bridge_events(self, event_ids):
+        validate_bridge_ack(event_ids)
+        for _ in range(_CAS_ATTEMPTS):
+            operations = []
+            for event_id in event_ids:
+                canonical = self._get(self._key('bridge-event', event_id))
+                if canonical is None:
+                    fail('bridge_event_not_found', 'No se encuentra ese evento del puente.', 404)
+                if canonical['acknowledged']:
+                    continue
+                pending = self._get('bridge-pending|' + event_id)
+                if pending is None:
+                    _unavailable()
+                updated = self._entity(canonical['RowKey'], {'event_id': event_id, 'document': canonical['document'], 'acknowledged': True})
+                delete_options = {k: v for k, v in self._cas(pending).items() if k != 'mode'}
+                operations.extend([('update', updated, self._cas(canonical)), ('delete', pending, delete_options)])
+            if not operations or self._transaction(operations):
+                return {'acknowledged': event_ids}
         _unavailable()

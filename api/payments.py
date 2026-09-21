@@ -32,6 +32,7 @@ _ID = re.compile(r'[0-9]{1,25}\Z')
 _PREF = re.compile(r'[A-Za-z0-9-]{1,160}\Z')
 _CHECKOUT_HOSTS = {'www.mercadopago.cl', 'www.mercadopago.com', 'mercadopago.cl', 'mercadopago.com'}
 _REQUEST_DEADLINE = ContextVar('patio_payment_deadline', default=None)
+BRIDGE_EVENT_ID = re.compile(r'bridge1:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[0-9]{10}\Z')
 
 
 @contextmanager
@@ -64,6 +65,58 @@ def number(value):
         return result
     except (InvalidOperation, ValueError):
         fail('provider_mismatch', 'El proveedor devolvió un importe inválido.', 502)
+
+
+def classify_payment(stage, total, payments):
+    """One classification for the storefront and the private order bridge."""
+    approved = [p for p in payments if p['status'] == 'approved' and number(p['refunded']) < total]
+    active = [p for p in payments if p['status'] in {'pending', 'in_process', 'authorized'}]
+    returns = [p for p in payments if p['status'] == 'refunded' or number(p['refunded']) > 0]
+    if stage != 'ready': return 'needs_review'
+    if any(p['status'] in {'charged_back', 'in_mediation'} for p in payments): return 'test_disputed'
+    if (len(approved) > 1 or (active and (approved or returns)) or
+            (approved and any(p['payment_id'] != approved[0]['payment_id'] for p in returns))): return 'needs_review'
+    if approved: return 'test_partially_refunded' if number(approved[0]['refunded']) > 0 else 'test_approved'
+    if any(p['status'] == 'refunded' or number(p['refunded']) >= total for p in payments): return 'test_refunded'
+    if active: return 'test_pending'
+    return 'test_rejected' if payments else 'awaiting_payment'
+
+
+def bridge_enabled(row):
+    if row is None: return False
+    version = json.loads(row['snapshot']).get('bridgeVersion')
+    return type(version) is int and version == 1
+
+
+def make_bridge_event(row, sequence, payments, kind):
+    """Explicit DTO; never copy capabilities, storage hashes or raw provider JSON."""
+    snap = json.loads(row['snapshot'])
+    if not bridge_enabled(row): return None
+    checkout = {key: snap[key] for key in ('id', 'createdAt', 'mode', 'currency', 'total', 'shipping', 'delivery', 'bridgeVersion')}
+    checkout['customer'] = {'name': snap['customer']['name']}
+    checkout['items'] = [{k: item[k] for k in ('id', 'name', 'qty', 'unitPrice', 'lineTotal')} for item in snap['items']]
+    if len(payments) > 100: fail('payment_history_limit', 'El historial de este intento necesita revisión.', 503)
+    event = {'schemaVersion': 1, 'id': f"bridge1:{row['order_id']}:{sequence:010d}", 'sequence': sequence,
+            'type': kind, 'createdAt': now(), 'source': {'provider': 'mercadopago', 'mode': 'test',
+            'sellerId': row['seller_id'], 'checkoutOrderId': row['order_id'], 'preferenceId': row['preference_id']},
+            'checkout': checkout, 'paymentStatus': classify_payment(row['stage'], snap['total'], payments),
+            'payments': [{'paymentId': p['payment_id'], 'status': p['status'], 'refunded': p['refunded'],
+                          'providerUpdated': p['provider_updated'], 'checkedAt': p['checked_at']} for p in payments]}
+    encoded = _json(event)
+    if len(encoded.encode('utf-16-le')) > 60_000 or len(encoded.encode('utf-8')) > 65536:
+        fail('payment_history_limit', 'El evento del intento supera el límite de almacenamiento y necesita revisión.', 503)
+    return event
+
+
+def validate_bridge_page(limit, cursor):
+    if type(limit) is not int or not 1 <= limit <= 50 or (cursor is not None and (not isinstance(cursor, str) or not BRIDGE_EVENT_ID.fullmatch(cursor))):
+        fail('invalid_bridge_page', 'Paginación del puente inválida.')
+
+
+def validate_bridge_ack(event_ids):
+    if (not isinstance(event_ids, list) or not 1 <= len(event_ids) <= 50 or
+            any(not isinstance(item, str) or not BRIDGE_EVENT_ID.fullmatch(item) for item in event_ids) or len(set(event_ids)) != len(event_ids)):
+        fail('invalid_bridge_ack', 'Indica entre 1 y 50 eventos distintos del puente.')
 
 
 def public_https(value):
@@ -209,7 +262,9 @@ class SQLitePaymentRepository:
               CREATE TABLE IF NOT EXISTS patio_mp_payments(
               payment_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, status TEXT NOT NULL,
               refunded TEXT NOT NULL, provider_updated TEXT NOT NULL, checked_at TEXT NOT NULL);
-              CREATE INDEX IF NOT EXISTS patio_mp_order_payments ON patio_mp_payments(order_id);''')
+              CREATE INDEX IF NOT EXISTS patio_mp_order_payments ON patio_mp_payments(order_id);
+              CREATE TABLE IF NOT EXISTS patio_mp_bridge_heads(order_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL);
+              CREATE TABLE IF NOT EXISTS patio_mp_bridge_events(id TEXT PRIMARY KEY, document TEXT NOT NULL, acknowledged INTEGER NOT NULL DEFAULT 0);''')
 
     def connect(self):
         db=sqlite3.connect(self.path,timeout=remaining_timeout(2),isolation_level=None);db.row_factory=sqlite3.Row;return db
@@ -237,8 +292,11 @@ class SQLitePaymentRepository:
             if old is None: fail('checkout_not_found','Intento no reconocido.',404)
             if old['stage']=='ready' and old['preference_id']!=preference_id:
                 fail('recovery_conflict','El intento ya tiene otra preferencia confirmada.',409)
+            if old['stage']=='ready':
+                db.commit();return dict(old)
             db.execute("UPDATE patio_mp_checkouts SET stage='ready',preference_id=?,checkout_url=? WHERE order_id=?",(preference_id,checkout_url,order_id))
             result=dict(db.execute('SELECT * FROM patio_mp_checkouts WHERE order_id=?',(order_id,)).fetchone())
+            self._append_bridge_event(db, result, [], 'checkout.ready')
             db.commit();return result
 
     def mark_uncertain(self,order_id):
@@ -258,7 +316,38 @@ class SQLitePaymentRepository:
                 db.commit();return
             fields=('payment_id','order_id','status','refunded','provider_updated','checked_at')
             db.execute('INSERT INTO patio_mp_payments VALUES(?,?,?,?,?,?) ON CONFLICT(payment_id) DO UPDATE SET status=excluded.status,refunded=excluded.refunded,provider_updated=excluded.provider_updated,checked_at=excluded.checked_at',tuple(payment[k] for k in fields))
+            checkout=db.execute('SELECT * FROM patio_mp_checkouts WHERE order_id=?',(payment['order_id'],)).fetchone()
+            if checkout and bridge_enabled(checkout):
+                rows=[dict(p) for p in db.execute('SELECT * FROM patio_mp_payments WHERE order_id=? ORDER BY provider_updated DESC,payment_id',(payment['order_id'],))]
+                self._append_bridge_event(db, dict(checkout), rows, 'payment.observed')
             db.commit()
+
+    @staticmethod
+    def _append_bridge_event(db, row, payments, kind):
+        if not bridge_enabled(row): return
+        previous=db.execute('SELECT sequence FROM patio_mp_bridge_heads WHERE order_id=?',(row['order_id'],)).fetchone()
+        sequence=previous['sequence']+1 if previous else 1
+        event=make_bridge_event(row,sequence,payments,kind)
+        db.execute('INSERT INTO patio_mp_bridge_heads VALUES(?,?) ON CONFLICT(order_id) DO UPDATE SET sequence=excluded.sequence',(row['order_id'],sequence))
+        db.execute('INSERT INTO patio_mp_bridge_events(id,document) VALUES(?,?)',(event['id'],_json(event)))
+
+    def pull_bridge_events(self, limit=30, cursor=None):
+        validate_bridge_page(limit,cursor)
+        with closing(self.connect()) as db:
+            rows=db.execute('SELECT id,document FROM patio_mp_bridge_events WHERE acknowledged=0 AND id>? ORDER BY id LIMIT ?', (cursor or '',limit+1)).fetchall()
+        return {'events':[json.loads(row['document']) for row in rows[:limit]],
+                'nextCursor':rows[limit-1]['id'] if len(rows)>limit else None}
+
+    def ack_bridge_events(self,event_ids):
+        validate_bridge_ack(event_ids)
+        with closing(self.connect()) as db:
+            db.execute('BEGIN IMMEDIATE')
+            for event_id in event_ids:
+                if not db.execute('SELECT 1 FROM patio_mp_bridge_events WHERE id=?',(event_id,)).fetchone():
+                    fail('bridge_event_not_found','No se encuentra ese evento del puente.',404)
+                db.execute('UPDATE patio_mp_bridge_events SET acknowledged=1 WHERE id=?',(event_id,))
+            db.commit()
+        return {'acknowledged':event_ids}
 
 
 class PaymentStore:
@@ -309,7 +398,7 @@ class PaymentStore:
         total=sum(x['lineTotal'] for x in lines)
         if total>10_000_000: fail('test_limit','El importe excede el límite de esta prueba.')
         order_id=str(uuid.uuid4())
-        snapshot={'id':order_id,'createdAt':now(),'mode':'test','currency':'CLP','items':lines,'total':total,'shipping':0,'customer':{'name':body['customer']['name'].strip()},'delivery':'demo_pickup'}
+        snapshot={'id':order_id,'createdAt':now(),'mode':'test','currency':'CLP','items':lines,'total':total,'shipping':0,'customer':{'name':body['customer']['name'].strip()},'delivery':'demo_pickup','bridgeVersion':1}
         row,created=self.repository.reserve_checkout({'request_id':request_id,'order_id':order_id,'fingerprint':fingerprint,
             'key_hash':digest,'snapshot':_json(snapshot),'stage':'creating','preference_id':None,'checkout_url':None,
             'seller_id':str(self.config.seller_id),'created_at':now()})
@@ -358,18 +447,7 @@ class PaymentStore:
     def status(self,body):
         row=self.authorized(body);snap=json.loads(row['snapshot'])
         payments=self.repository.payments_for_order(row['order_id'])
-        approved=[p for p in payments if p['status']=='approved' and number(p['refunded'])<snap['total']]
-        active=[p for p in payments if p['status'] in {'pending','in_process','authorized'}]
-        returns=[p for p in payments if p['status']=='refunded' or number(p['refunded'])>0]
-        if row['stage']!='ready': state='needs_review'
-        elif any(p['status'] in {'charged_back','in_mediation'} for p in payments): state='test_disputed'
-        elif len(approved)>1: state='needs_review'
-        elif active and (approved or returns): state='needs_review'
-        elif approved: state='test_partially_refunded' if number(approved[0]['refunded'])>0 else 'test_approved'
-        elif any(p['status']=='refunded' or number(p['refunded'])>=snap['total'] for p in payments): state='test_refunded'
-        elif any(p['status'] in {'pending','in_process','authorized','in_mediation'} for p in payments): state='test_pending'
-        elif payments: state='test_rejected'
-        else: state='awaiting_payment'
+        state=classify_payment(row['stage'],snap['total'],payments)
         return {'payment':{'orderId':row['order_id'],'mode':'test','status':state,'currency':'CLP','total':snap['total'],'items':snap['items'],'fulfillmentAllowed':False,'realPayment':False,'checkedAt':max((p['checked_at'] for p in payments),default=None)}}
 
     def reconcile(self,body):
